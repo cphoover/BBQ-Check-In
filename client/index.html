@@ -1,0 +1,432 @@
+<!--
+	jQuery Mobile Boilerplate
+	index.html
+-->
+<!doctype html>
+<html>
+<head>
+	<title> Open Source BBQ CheckIn </title>
+
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<meta name="apple-mobile-web-app-capable" content="yes">
+	<meta name="apple-mobile-web-app-status-bar-style" content="black">
+	<meta name="HandheldFriendly" content="True">
+	<meta name="MobileOptimized" content="320">
+     <meta name="viewport" content="initial-scale = 1.0,maximum-scale = 1.0" />
+<!-- Home screen icon  Mathias Bynens mathiasbynens.be/notes/touch-icons -->
+	<!-- For iPhone 4 with high-resolution Retina display: -->
+	<link rel="apple-touch-icon-precomposed" sizes="114x114" href="apple-touch-icon.png">
+	<!-- For first-generation iPad: -->
+	<link rel="apple-touch-icon-precomposed" sizes="72x72" href="apple-touch-icon.png">
+	<!-- For non-Retina iPhone, iPod Touch, and Android 2.1+ devices: -->
+	<link rel="apple-touch-icon-precomposed" href="apple-touch-icon-precomposed.png">
+	<!-- For nokia devices and desktop browsers : -->
+	<link rel="shortcut icon" href="favicon.ico" />
+	
+	<!-- Mobile IE allows us to activate ClearType technology for smoothing fonts for easy reading -->
+	<meta http-equiv="cleartype" content="on">
+
+	<!-- jQuery Mobile CSS bits -->
+  <!--  <link rel="stylesheet" href="http://code.jquery.com/mobile/1.1.0/jquery.mobile-1.1.0.min.css" />-->   
+<link rel="stylesheet" href="http://code.jquery.com/mobile/1.0b2/jquery.mobile-1.0b2.min.css" />   
+ <!--    <link rel="stylesheet" href="js/jquery.mobile-1.1.0.min.css">  -->
+     
+
+	<!-- Javascript includes -->  
+  <!--    <script src="js/jquery-1.6.4.min.js"></script>-->    
+	
+    <script src="http://code.jquery.com/jquery-1.7.1.min.js"></script>  
+	<script src="js/ios-orientationchange-fix.min.js"></script>  
+	
+	<!--<script src="http://code.jquery.com/mobile/1.1.0/jquery.mobile-1.1.0.min.js"></script>-->
+	<script src="js/jquery.mobile-1.0.1.min.js"></script>
+	
+	<!-- Add a Bookmark Bubble for iDevices, and adds a cookie if already shown -->
+	<script type="text/javascript" src="js/bookmark_bubble.js"></script>
+    <script src="js/socket.io.min.js"></script>
+    
+    
+</head> 
+<body> 
+	<div data-role="page">
+
+		<div data-role="header">
+			<h1>#OSSBBQ CheckIn</h1>
+		</div>
+
+		<div data-role="content">
+		
+			<ul id="member-list" data-role="listview" data-filter="true" data-inset="true" >                    <!-- data-theme="c" data-dividertheme="b" -->
+			</ul>
+
+		</div>  
+		
+	 
+		
+		<div data-role="footer" data-theme="c">
+			<p>&copy; 2012 -Open Source BBQ CheckIn</p>
+		</div>	
+		
+	</div>  
+	<script type="text/javascript">  
+	  var actionQueue = [];
+	  var membersReady = false;
+	  var pageReady = false;
+	  var socketConnected = false;
+	  var meetupConnected = false; 
+	  var memberData = null;
+	  var members = null; 
+	  var checkInLock = false; 
+	  var events = {  
+		     65996222 : "DC jQuery Users Group",
+			 66805842 : "WordPress DC",
+			 66808992 : "DC PHP",
+			 66927452 : "DC Droids"  
+	  }
+	
+	 var socket = io.connect('http://rsvp-cphoover.dotcloud.com/');
+	  // var socket = io.connect('http://localhost:8080/');
+	
+    	socket.on('connect', function (socket) {  
+	
+	
+	       //  alert('connected');
+   	     	socketConnected = true;  
+			
+				
+	    });   
+
+		  socket.on('loadMemberData', function(data){ 
+		   
+		  memberData = data; 
+		
+		//should be callign a recursive function... that checks if ready  that way it will wait untill it is ready...
+		// you can do a set timeout...
+	      	    if(checkReady()){  
+					getMembers();
+				}    
+
+		});
+		
+		
+	
+	
+	var checkReady = function(){    
+		return (pageReady && socketConnected);		
+	};
+	
+	var initRSVPs = function(){   
+	
+	    checkInLock = true;   
+	
+	
+		for(var memberDataIndex in memberData){     
+		    if(memberData[memberDataIndex].state == 1){
+				  checkEmIn(memberData[memberDataIndex].member);
+			}
+		    else if(memberData[memberDataIndex].state == 0){
+				checkEmOut(memberData[memberDataIndex].member); 
+			}
+
+		}    
+		   setTimeout(setMembersReady, 50);
+	   
+		  
+		
+	}                     
+	//this preforms the actions that could not have taken place because we hadn't constructed our members object yet.... 
+	//(ie pushes that were sent to us before we got the list from the db)
+	var initLockedRSVPs = function(){
+		 
+	      
+	 	setTimeout(syncingMessage, 0);
+		for(var actionQueueIndex in actionQueue){
+			if(actionQueue[actionQueueIndex].action){  
+				checkEmIn(actionQueue[actionQueueIndex].id)
+			}
+		    else if(actionQueue[actionQueueIndex].action == 0){
+				 checkEmOut(actionQueue[actionQueueIndex].id)    
+			}   
+		}  
+		//actionQueue = {};  
+	    $('#member-list').listview('refresh'); 
+		setTimeout(hideLoadingMsg, 0); 
+		
+		return true;
+		
+	}
+	
+	var redrawScreen = function(elem){
+		$(elem).listview('refresh');  
+	};
+	var initMemberList = function(data, callback){   
+
+	   // console.log('test');
+	 	console.time('initMemberList');   
+	
+		var lastEventId = null;
+		for(var resultIndex in data.results){    
+		   //no duplicates && they have to rsvp too!
+		  if((members[data.results[resultIndex].member_id]==null) && (data.results[resultIndex].response == "yes")){  
+			if(data.results[resultIndex].event_id != lastEventId){ 
+			  lastEventId = data.results[resultIndex].event_id;  
+			   $('#member-list').append('<li data-role="list-divider">' + events[lastEventId] + '</li>'); 
+			}
+			//$('#member-list').append('<li data-role="list-divider">Women</li> 
+			   
+		     members[data.results[resultIndex].member_id] = data.results[resultIndex];   
+		 	 addMembersToScreen(data.results[resultIndex].member_id, data.results[resultIndex].name); 
+		    }
+			
+		}    
+		console.timeEnd('initMemberList'); 
+	    redrawScreen('#member-list');
+	    setTimeout(callback, 50)  
+	}                           
+	
+	var setMembersReady = function(){
+		membersReady = true; 
+		setTimeout(initLockedRSVPs, 0);    
+	}
+	var addMembersToScreen = function(id, name){
+            //<li data-role="list-divider">Women</li>
+ 			$('#member-list').append('<li id="member-' + id + '" data-icon="check"><a href="javascript:rsvpMember(\'' + id + '\')">' + name + '</a></li>');
+	};
+	   
+	var showLoadingMsg = function(message){
+	    if(message != null) {
+		  $.mobile.loadingMessage = message;    
+		}  
+	    $.mobile.showPageLoadingMsg();
+	}
+    var changeLoadingMsg = function(message){
+		$.mobile.loadingMessage = message;
+	};
+	
+	var hideLoadingMsg = function(){
+		 $.mobile.hidePageLoadingMsg();  
+	};
+	
+	var checkMemberReady = function(){
+		return (socketConnected && meetupConnected);  
+
+	}  
+	
+	
+	var meetupSuccessHelper = function(data){    
+		
+		//window.tehData = data.query.results.results;  
+	   var rsvpsGrouped = data.query.results.results;
+	   var rsvps  = [];
+		for(var rsvpsGroupedIndex in rsvpsGrouped){
+			rsvps = rsvps.concat(rsvpsGrouped[rsvpsGroupedIndex].items.item);  
+		    //console.log(rsvpsGrouped[rsvpsGroupedIndex].items.item);	
+		}
+	 //   window.tehRSVPS = rsvps;     
+	
+	    var rsvpObject = {'results': rsvps};
+	 // 
+	
+	
+        meetupSuccess(rsvpObject);
+	}
+	var meetupSuccess =  function(data){ 
+	 //   console.log(data, 'meetupSuccess Data');
+ 		 
+ 
+		
+		//initialize the members object
+		members = {};  
+		
+		
+        
+ 		//change the members object to reflect the membersData object's states
+
+		
+		//set the flag to true
+	    meetupConnected = true;   
+	      
+ 		initMemberList(data, initRSVPs); 
+
+	
+	 	setTimeout(syncingMessage, 0);    
+		checkInLock = false;   
+
+
+                  
+	}   
+	
+	var syncingMessage = function(){
+		showLoadingMsg('Syncing RSVP Data...');
+	}
+
+	var hideInitLoadMsg = function(){   
+  		if(socketConnected && meetupConnected){  
+  			// should be checkign to make sure no other process is happening .... 
+  			//would be better to be able to create objects of the pageLoadingMsg
+  			$.mobile.hidePageLoadingMsg();
+
+  		}  	
+	}    
+	
+	
+	 var getMembers = function(){ 
+		 	showLoadingMsg("Loading Member Data...");  
+			$.ajax({
+			   // url: "https://api.meetup.com/rsvps?key=59776c2a34571f27353a3d251702dc&sign=true&event_id=65996222,66805842,66808992,66927452&callback=doit",   
+				url: "https://query.yahooapis.com/v1/public/yql?q=select%20*%20from%20meetup.rsvps%20where%20key%3D'59776c2a34571f27353a3d251702dc'%20and%20(event_id%3D65996222%20OR%20event_id%3D66805842%20OR%20event_id%3D66808992%20OR%20event_id%3D66927452)&format=json&diagnostics=true&env=store%3A%2F%2Fdatatables.org%2Falltableswithkeys",                                
+			    dataType: 'jsonp', 
+				error: function(){
+				   alert("error connecting to server...");
+				},
+				success: meetupSuccessHelper
+
+
+			});  
+
+		
+	};  
+	 
+	
+	
+	////////////SOCKET EVENTS!!!
+	
+	 //data is the best variable name ever....</sarcasm>   
+	
+	 /// we need to make sure these events get handled after the database...  
+	//this is a consistancey issue 
+	socket.on('checkIn', function (data) {  
+            checkEmIn(data.member, 1);         	                                
+	   });                                                                      
+	
+	socket.on('checkOut', function (data) { 
+            checkEmOut(data.member, 1);      
+	   });
+    
+
+
+	
+	jQuery(document).ready(function(){  
+	   
+		  pageReady = true;
+	   
+
+	}); 
+	
+	
+	
+	function rsvpMember(id){   
+		
+		///THIS IS THE WRONG WAY TO DO IT... INSTEAD LOAD ALL OF THE MEMBERS INTO AN OBJECT MEMBERS... THEN THEY CAN HAVE A PROPERTY CHECKED IN...
+	         
+   // if(navigator.onLine == true)
+	{
+				   
+			 if(members[id].checkedIn == null){   
+				members[id].checkedIn = false;
+		  	  }  
+		
+			if(members[id].checkedIn == false){ 
+				
+				// $.mobile.loadingMessage = "Checking in...";    
+			    // $.mobile.showPageLoadingMsg();
+			   changeCSS(true, id);   
+			   socket.emit('rsvp', { member: id, state: '1' });
+					   
+				
+				
+			   //checkEmIn(id);
+			}                 
+			else{    
+				  //  $.mobile.loadingMessage = "Checking Out...";
+					//$.mobile.showPageLoadingMsg();     
+			   	 
+			       if(confirm("Are you sure you want checkout: " + members[id].name + "?")){ 
+						changeCSS(false, id);
+			  	   		socket.emit('rsvp', { member: id,  state: '0' });                        
+					}
+				 
+
+			} 
+		 }
+		// else
+		 {
+		 	//	alert("Problems with connecting to internet...");
+		 }
+	    
+		
+		
+		 
+		
+	} 
+	
+	function checkEmIn(id, socketInitiated){     
+		//console.time(' CheckEmIn'); 
+		
+		var member = { 	'id' : id, 'action' : 1};   
+	
+       //  console.log(members);
+		  if(!membersReady && (socketInitiated != null)){
+			actionQueue.push(member);
+		}   
+		
+		   // if(members == null){
+		      //  console.log(id);
+		 //  }
+				
+	  		if(members[id] != null){    
+               members[id].checkedIn = true;   
+
+               changeCSS(true, id)
+			   
+			   
+		
+			} 
+		    
+		
+		//console.timeEnd('end  CheckEmIn'); 
+		                                           
+		  
+	 
+	}  
+	var changeCSS = function(checkedIn , id){
+		if(checkedIn){
+			$('#member-' + id + ' span.ui-icon').addClass("ui-icon-minus").removeClass("ui-icon-check");
+			$('#member-' + id).css({'background' : '#111', 'color' : '#FFF'});  
+		    $('#member-' + id + ' a').css({'color' : '#FFF', 'text-shadow': '0 -1px 1px black'});
+		}
+		else{
+		   $('#member-' + id + ' span.ui-icon').addClass("ui-icon-check").removeClass("ui-icon-minus");   	
+		   $('#member-' + id).css({'background' : '', 'color' : ''});  
+		   $('#member-' + id + ' a').css({'color' : '', 'text-shadow': ''});
+	       
+		}   
+	}
+	
+	function checkEmOut(id, socketInitiated){
+		
+	   // console.time('CheckEmOut');   
+		 
+    	var member = { 	'id' : id, 'action' : 0 };
+
+		if(!membersReady && (socketInitiated != null)){
+			actionQueue.push(member);
+		} 
+		
+	 
+		if(members[id] != null){ 
+			
+		   
+		   
+		   members[id].checkedIn = false; 
+		   
+		   changeCSS(false, id);
+           $('#member-list').listview('refresh'); 
+       }    
+
+	 
+	}
+	</script>	
+</body>
+</html>
